@@ -1,0 +1,9 @@
+.git
+.github
+.devcontainer
+bin/
+dist/
+coverage.out
+*.test
+*.prof
+.env

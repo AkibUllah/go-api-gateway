@@ -1,0 +1,65 @@
+# Gateway + three demo upstreams + Redis (shared rate-limit buckets).
+#   docker compose up --build
+#   curl localhost:8080/api/catalog/products/7
+name: go-api-gateway
+
+x-upstream: &upstream
+  build: .
+  image: go-api-gateway:local
+  command: ["/usr/local/bin/echo-upstream"]
+  restart: unless-stopped
+
+services:
+  gateway:
+    build:
+      context: .
+      args:
+        VERSION: compose
+    image: go-api-gateway:local
+    ports:
+      - "8080:8080"   # public listener
+      - "9090:9090"   # admin: /metrics, /healthz, /readyz
+    environment:
+      CATALOG_1_URL: http://catalog-1:9001
+      CATALOG_2_URL: http://catalog-2:9001
+      ORDERS_URL: http://orders:9001
+      REDIS_ADDR: redis:6379
+      RATE_LIMIT_BACKEND: redis
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+      PARTNER_API_KEY: ${PARTNER_API_KEY:-demo-partner-key}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GATEWAY_DRAIN_DELAY: 2s
+    depends_on:
+      redis:
+        condition: service_healthy
+      catalog-1:
+        condition: service_started
+      catalog-2:
+        condition: service_started
+      orders:
+        condition: service_started
+    restart: unless-stopped
+
+  catalog-1:
+    <<: *upstream
+    environment: {SERVICE_NAME: catalog, INSTANCE: catalog-1, PORT: "9001"}
+    healthcheck: {disable: true}
+
+  catalog-2:
+    <<: *upstream
+    environment: {SERVICE_NAME: catalog, INSTANCE: catalog-2, PORT: "9001"}
+    healthcheck: {disable: true}
+
+  orders:
+    <<: *upstream
+    environment: {SERVICE_NAME: orders, INSTANCE: orders-1, PORT: "9001"}
+    healthcheck: {disable: true}
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
