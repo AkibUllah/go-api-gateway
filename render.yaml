@@ -1,0 +1,21 @@
+# One free web service running the gateway with its in-process demo upstreams
+# (cmd/gateway-demo), so the blueprint deploys without extra services.
+services:
+  - type: web
+    name: go-api-gateway
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: /usr/local/bin/gateway-demo
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: LOG_LEVEL
+        value: info
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PARTNER_API_KEY
+        generateValue: true

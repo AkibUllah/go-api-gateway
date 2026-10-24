@@ -8,6 +8,16 @@ A reverse-proxy API gateway in Go: YAML-configured routes and upstream pools wit
 ![Dependencies](https://img.shields.io/badge/direct%20deps-4-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Try it live
+
+| | |
+|---|---|
+| Run in your browser | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AkibUllah/go-api-gateway?quickstart=1) — runs `docker compose up` (gateway, two catalog replicas, an orders service, Redis); open forwarded port 8080 at `/api/catalog/products/7`, and 9090 at `/metrics`. Mint a token with `make token`. |
+| One-click deploy | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/AkibUllah/go-api-gateway) — `render.yaml` runs `gateway-demo` (the gateway plus in-process demo upstreams) on a free web service; `JWT_SECRET` and `PARTNER_API_KEY` are generated, read them from the service's environment tab. |
+| Local | `docker compose up` or `make demo` (see Quick Start) |
+
+There is no GitHub Pages site for this repo: the gateway is a network service, and the Codespace or Render deploy is the real thing.
+
 ## Why this exists
 
 In the payment and e-commerce systems I have worked on, every service eventually grows the same edge code: check the token, throttle the noisy client, retry the flaky dependency, stop calling it when it is down, log a request ID that links all of it together. Done per service it drifts and gets subtly wrong (trusting a spoofed `X-Forwarded-For` for rate limiting is the classic). This gateway puts that edge in one small Go binary built on `net/http` and `httputil.ReverseProxy`, with four direct dependencies, so the behaviour is easy to read, test and reason about under load.

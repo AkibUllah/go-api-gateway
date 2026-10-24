@@ -1,0 +1,36 @@
+{
+  "name": "go-api-gateway",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.26"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb"
+  },
+  "forwardPorts": [8080, 9090],
+  "portsAttributes": {
+    "8080": {
+      "label": "Gateway (try /api/catalog/products/7)",
+      "onAutoForward": "notify"
+    },
+    "9090": {
+      "label": "Admin (/metrics, /readyz)",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "go mod download",
+  "postStartCommand": "docker compose up -d --build",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+      ]
+    }
+  }
+}
