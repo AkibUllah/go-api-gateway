@@ -1,0 +1,17 @@
+# build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+*.prof
+coverage.*
+
+# local config
+.env
+*.local.yaml
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
