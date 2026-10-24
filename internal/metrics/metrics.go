@@ -61,7 +61,7 @@ func New() *Metrics {
 		}, []string{"route", "method"}),
 		TargetHealthy: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "gateway_upstream_target_healthy",
-			Help: "1 when the target passes active health checks.",
+			Help: "1 when the target (host:port) passes active health checks.",
 		}, []string{"upstream", "target"}),
 		CircuitState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "gateway_circuit_state",

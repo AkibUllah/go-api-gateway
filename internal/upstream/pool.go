@@ -87,7 +87,7 @@ func NewPool(name string, cfg config.Upstream, obs Observer, now func() time.Tim
 		}
 		t := &Target{URL: u}
 		t.healthy.Store(true)
-		target := u.String()
+		target := u.Host
 		t.breaker = breaker.New(breaker.Settings{
 			FailureThreshold: cfg.CircuitBreaker.FailureThreshold,
 			OpenTimeout:      cfg.CircuitBreaker.OpenTimeout.D(),

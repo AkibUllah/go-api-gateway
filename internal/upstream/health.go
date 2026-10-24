@@ -70,7 +70,7 @@ func (p *Pool) CheckOnce(ctx context.Context, client *http.Client, t *Target, lo
 		t.failStreak = 0
 		if !t.Healthy() && t.okStreak >= hc.HealthyThreshold {
 			t.healthy.Store(true)
-			p.observer.TargetHealth(p.Name, t.URL.String(), true)
+			p.observer.TargetHealth(p.Name, t.URL.Host, true)
 			if log != nil {
 				log.Info("upstream target healthy", "upstream", p.Name, "target", t.URL.String())
 			}
@@ -81,7 +81,7 @@ func (p *Pool) CheckOnce(ctx context.Context, client *http.Client, t *Target, lo
 	t.okStreak = 0
 	if t.Healthy() && t.failStreak >= hc.UnhealthyThreshold {
 		t.healthy.Store(false)
-		p.observer.TargetHealth(p.Name, t.URL.String(), false)
+		p.observer.TargetHealth(p.Name, t.URL.Host, false)
 		if log != nil {
 			log.Warn("upstream target unhealthy", "upstream", p.Name, "target", t.URL.String(), "error", errString(err))
 		}
