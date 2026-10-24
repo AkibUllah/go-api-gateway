@@ -94,8 +94,10 @@ func NewRouter(routes []*Route) *Router {
 // accepted the method, allowed lists the methods that would have matched.
 func (rt *Router) Match(r *http.Request) (route *Route, allowed []string) {
 	host := strings.ToLower(r.Host)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	if strings.IndexByte(host, ':') >= 0 { // avoid SplitHostPort's error allocation for bare hosts
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
 	}
 	for _, rr := range rt.routes {
 		if !rr.matchHost(host) || !rr.matchPath(r.URL.Path) {

@@ -196,3 +196,24 @@ func TestSingleJoin(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkPickLeastConn(b *testing.B) {
+	p, _ := NewPool("bench", config.Upstream{
+		Targets:        []string{"http://a:1", "http://b:1", "http://c:1", "http://d:1"},
+		Balancer:       "least_conn",
+		CircuitBreaker: config.CircuitBreaker{FailureThreshold: 5, OpenTimeout: config.Duration(time.Second)},
+	}, nil, nil)
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			t, err := p.Pick(nil)
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			release := t.Acquire()
+			t.Breaker().Done(true)
+			release()
+		}
+	})
+}
