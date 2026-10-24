@@ -1,0 +1,143 @@
+# Demo configuration for "Dokan", a fictional Dhaka online shop.
+#
+# Values of the form ${NAME:-default} are read from the environment at load
+# time (and on every SIGHUP reload). Defaults point at the echo upstreams on
+# 127.0.0.1:9001-9003 started by `make demo` / cmd/gateway-demo; docker
+# compose overrides them with container hostnames.
+
+server:
+  listen: ":${PORT:-8080}"
+  read_header_timeout: 5s
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+  shutdown_timeout: 20s
+  default_timeout: 15s
+  max_body_bytes: 2MiB
+  # Believe X-Forwarded-For only from these peers (docker / k8s networks).
+  trusted_proxies: ["127.0.0.1", "10.0.0.0/8", "172.16.0.0/12"]
+
+admin:
+  listen: "${ADMIN_LISTEN:-:9090}"
+
+logging:
+  level: "${LOG_LEVEL:-info}"
+  format: json
+
+redis:
+  addr: "${REDIS_ADDR:-}"
+  fail_open: true
+
+upstreams:
+  catalog:
+    balancer: round_robin
+    targets:
+      - "${CATALOG_1_URL:-http://127.0.0.1:9001}"
+      - "${CATALOG_2_URL:-http://127.0.0.1:9002}"
+    health_check:
+      path: /health
+      interval: 5s
+      timeout: 1s
+      healthy_threshold: 2
+      unhealthy_threshold: 2
+    circuit_breaker:
+      failure_threshold: 5
+      open_timeout: 15s
+    retries:
+      attempts: 1
+      backoff: 20ms
+
+  orders:
+    balancer: least_conn
+    targets:
+      - "${ORDERS_URL:-http://127.0.0.1:9003}"
+    health_check:
+      path: /health
+      interval: 5s
+    circuit_breaker:
+      failure_threshold: 3
+      open_timeout: 10s
+
+jwt:
+  customers:
+    algorithms: [HS256]
+    # Render generates JWT_SECRET; the default exists only for local demos.
+    secret: "${JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}"
+    issuer: https://auth.dokan.local
+    audience: dokan-api
+    leeway: 30s
+    forward_claims:
+      sub: X-User-ID
+      role: X-User-Role
+
+api_keys:
+  partners:
+    header: X-API-Key
+    keys:
+      - name: pathao-courier
+        key: "${PARTNER_API_KEY:-demo-partner-key}"
+      # sha256("sundarban-logistics-key"): store digests, never plain keys, when you can.
+      - name: sundarban-logistics
+        sha256: 5c3d7704e413fbc7eab6b4df77c29b1e27f2f39b7a4ccaddb25461757711d6a4
+
+rate_limits:
+  per_ip:
+    rate: 20
+    period: 1s
+    burst: 40
+    key: ip
+    backend: "${RATE_LIMIT_BACKEND:-memory}"
+  per_customer:
+    rate: 60
+    period: 1m
+    burst: 10
+    key: consumer
+    backend: "${RATE_LIMIT_BACKEND:-memory}"
+  per_partner:
+    rate: 300
+    period: 1m
+    burst: 50
+    key: consumer
+    backend: "${RATE_LIMIT_BACKEND:-memory}"
+
+cors:
+  storefront:
+    allowed_origins: ["https://dokan.com.bd", "https://*.dokan.com.bd", "http://localhost:5173"]
+    allowed_headers: [Authorization, Content-Type, X-Request-ID]
+    exposed_headers: [X-Request-ID, RateLimit-Remaining]
+    allow_credentials: true
+    max_age: 10m
+
+routes:
+  # Public product catalogue: anonymous, rate-limited per IP, gzip on.
+  - name: catalog
+    path_prefix: /api/catalog
+    strip_prefix: true
+    methods: [GET, HEAD, OPTIONS]
+    upstream: catalog
+    timeout: 5s
+    rate_limit: per_ip
+    cors: storefront
+    gzip: true
+
+  # Customer orders: bearer JWT required; the upstream receives X-User-ID.
+  - name: orders
+    path_prefix: /api/orders
+    strip_prefix: true
+    upstream: orders
+    timeout: 10s
+    max_body_bytes: 256KB
+    jwt: customers
+    rate_limit: per_customer
+    cors: storefront
+
+  # Courier partners push delivery status with an API key.
+  - name: partner-webhooks
+    path_prefix: /partner
+    strip_prefix: true
+    methods: [POST]
+    upstream: orders
+    timeout: 5s
+    max_body_bytes: 64KB
+    api_keys: partners
+    rate_limit: per_partner
