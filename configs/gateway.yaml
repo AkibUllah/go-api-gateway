@@ -74,11 +74,11 @@ api_keys:
   partners:
     header: X-API-Key
     keys:
-      - name: pathao-courier
+      - name: swift-courier
         key: "${PARTNER_API_KEY:-demo-partner-key}"
-      # sha256("sundarban-logistics-key"): store digests, never plain keys, when you can.
-      - name: sundarban-logistics
-        sha256: 5c3d7704e413fbc7eab6b4df77c29b1e27f2f39b7a4ccaddb25461757711d6a4
+      # sha256("river-logistics-key"): store digests, never plain keys, when you can.
+      - name: river-logistics
+        sha256: 344a5af00f8dab9171dabca59abae060b30959cbeb6a38a934e4dd5c638dfdec
 
 rate_limits:
   per_ip:
@@ -102,7 +102,7 @@ rate_limits:
 
 cors:
   storefront:
-    allowed_origins: ["https://dokan.com.bd", "https://*.dokan.com.bd", "http://localhost:5173"]
+    allowed_origins: ["https://dokan.test", "https://*.dokan.test", "http://localhost:5173"]
     allowed_headers: [Authorization, Content-Type, X-Request-ID]
     exposed_headers: [X-Request-ID, RateLimit-Remaining]
     allow_credentials: true

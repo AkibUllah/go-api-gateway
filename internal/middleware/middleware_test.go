@@ -153,7 +153,7 @@ func TestBodyLimit(t *testing.T) {
 
 func corsPolicy() config.CORSPolicy {
 	return config.CORSPolicy{
-		AllowedOrigins:   []string{"https://dokan.com.bd", "https://*.dokan.com.bd"},
+		AllowedOrigins:   []string{"https://dokan.test", "https://*.dokan.test"},
 		AllowedMethods:   []string{"GET", "POST"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"X-Request-ID"},
@@ -166,14 +166,14 @@ func TestCORSPreflight(t *testing.T) {
 	called := false
 	h := CORS(corsPolicy())(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	r := httptest.NewRequest("OPTIONS", "/api", nil)
-	r.Header.Set("Origin", "https://seller.dokan.com.bd")
+	r.Header.Set("Origin", "https://seller.dokan.test")
 	r.Header.Set("Access-Control-Request-Method", "POST")
 	rec := serve(h, r)
 	if called {
 		t.Fatal("preflight reached the upstream")
 	}
 	hd := rec.Header()
-	if rec.Code != 204 || hd.Get("Access-Control-Allow-Origin") != "https://seller.dokan.com.bd" ||
+	if rec.Code != 204 || hd.Get("Access-Control-Allow-Origin") != "https://seller.dokan.test" ||
 		hd.Get("Access-Control-Allow-Credentials") != "true" || hd.Get("Access-Control-Max-Age") != "600" ||
 		hd.Get("Access-Control-Allow-Methods") != "GET, POST" {
 		t.Fatalf("preflight response %d %v", rec.Code, hd)
@@ -183,11 +183,11 @@ func TestCORSPreflight(t *testing.T) {
 func TestCORSOrigins(t *testing.T) {
 	h := CORS(corsPolicy())(http.HandlerFunc(ok))
 	cases := map[string]bool{
-		"https://dokan.com.bd":         true,
-		"https://api.dokan.com.bd":     true,
-		"https://evil-dokan.com.bd":    false,
-		"http://api.dokan.com.bd":      false,
-		"https://dokan.com.bd.evil.io": false,
+		"https://dokan.test":         true,
+		"https://api.dokan.test":     true,
+		"https://evil-dokan.test":    false,
+		"http://api.dokan.test":      false,
+		"https://dokan.test.evil.io": false,
 	}
 	for origin, allowed := range cases {
 		r := httptest.NewRequest("GET", "/", nil)
@@ -339,13 +339,13 @@ func TestRateLimitByConsumerAndHeader(t *testing.T) {
 	byHeader := RateLimit(lim, RateLimitOptions{Route: "r", Policy: "p", Key: "header:X-Tenant", ClientIP: ip, Log: discard})(http.HandlerFunc(ok))
 
 	r := httptest.NewRequest("GET", "/", nil)
-	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, &auth.Principal{Consumer: "key:pathao"}))
+	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, &auth.Principal{Consumer: "key:swift"}))
 	serve(byConsumer, r)
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.Header.Set("X-Tenant", "shop-7")
 	serve(byHeader, r2)
 	serve(byHeader, httptest.NewRequest("GET", "/", nil)) // header missing -> IP
-	want := []string{"r:p:c:key:pathao", "r:p:h:shop-7", "r:p:ip:9.9.9.9"}
+	want := []string{"r:p:c:key:swift", "r:p:h:shop-7", "r:p:ip:9.9.9.9"}
 	if strings.Join(keys, " ") != strings.Join(want, " ") {
 		t.Fatalf("keys = %v, want %v", keys, want)
 	}
@@ -420,7 +420,7 @@ func TestJWTMiddleware(t *testing.T) {
 }
 
 func TestAPIKeyMiddlewareStripsKey(t *testing.T) {
-	v, _ := auth.NewAPIKeyVerifier(config.APIKeySet{Header: "X-API-Key", Keys: []config.APIKey{{Name: "pathao", Key: "k-123"}}})
+	v, _ := auth.NewAPIKeyVerifier(config.APIKeySet{Header: "X-API-Key", Keys: []config.APIKey{{Name: "swift", Key: "k-123"}}})
 	var got http.Header
 	h := APIKey(v, "partner", nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = r.Header.Clone() }))
 
@@ -429,7 +429,7 @@ func TestAPIKeyMiddlewareStripsKey(t *testing.T) {
 	if rec := serve(h, r); rec.Code != 200 {
 		t.Fatalf("valid key rejected: %d", rec.Code)
 	}
-	if got.Get("X-API-Key") != "" || got.Get(ConsumerHeader) != "key:pathao" {
+	if got.Get("X-API-Key") != "" || got.Get(ConsumerHeader) != "key:swift" {
 		t.Fatalf("upstream headers = %v", got)
 	}
 	r = httptest.NewRequest("POST", "/", nil)
@@ -508,7 +508,7 @@ func BenchmarkMiddlewareStack(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			r := httptest.NewRequest("GET", "/api/catalog/products", nil)
-			r.Header.Set("Origin", "https://dokan.com.bd")
+			r.Header.Set("Origin", "https://dokan.test")
 			h.ServeHTTP(httptest.NewRecorder(), r)
 		}
 	})

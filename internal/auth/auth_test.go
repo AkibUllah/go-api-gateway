@@ -269,13 +269,13 @@ func TestRSAFromJWKRejectsWeakKeys(t *testing.T) {
 
 func TestAPIKeyVerifier(t *testing.T) {
 	v, err := NewAPIKeyVerifier(config.APIKeySet{Header: "X-API-Key", Keys: []config.APIKey{
-		{Name: "pathao", Key: "plain-key"},
-		{Name: "sundarban", SHA256: HashKey("hashed-key")},
+		{Name: "swift", Key: "plain-key"},
+		{Name: "river", SHA256: HashKey("hashed-key")},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"plain-key": "key:pathao", "hashed-key": "key:sundarban"} {
+	for key, want := range map[string]string{"plain-key": "key:swift", "hashed-key": "key:river"} {
 		p, err := v.Verify(key)
 		if err != nil || p.Consumer != want {
 			t.Errorf("Verify(%q) = %+v, %v; want %s", key, p, err, want)
