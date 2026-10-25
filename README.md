@@ -4,6 +4,8 @@
 A reverse-proxy API gateway in Go: YAML-configured routes and upstream pools with health checks, load balancing, retries and circuit breakers, plus JWT/JWKS and API-key auth, token-bucket rate limiting (memory or Redis), CORS, gzip, Prometheus metrics and zero-downtime config reload.
 
 [![CI](https://github.com/AkibUllah/go-api-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/AkibUllah/go-api-gateway/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/AkibUllah/go-api-gateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/AkibUllah/go-api-gateway/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/AkibUllah/go-api-gateway)](https://github.com/AkibUllah/go-api-gateway/releases)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8)
 ![Dependencies](https://img.shields.io/badge/direct%20deps-4-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -17,6 +19,16 @@ A reverse-proxy API gateway in Go: YAML-configured routes and upstream pools wit
 | Local | `docker compose up` or `make demo` (see Quick Start) |
 
 There is no GitHub Pages site for this repo: the gateway is a network service, and the Codespace or Render deploy is the real thing.
+
+## Screenshots
+
+![curl session](docs/images/curl-session.png)
+
+*A real session against `gateway-demo` (gateway plus in-process upstreams): round-robin across the two catalog replicas, `401` without a JWT, the `X-User-Id` claim header the orders upstream receives with one, a rejected partner API key, the per-IP token bucket returning `429` after its burst, and the resulting Prometheus counters.*
+
+![Tests and benchmarks](docs/images/test-and-bench.png)
+
+*`go test -cover` per package and the benchmark suite on a 4-core laptop.*
 
 ## Why this exists
 
@@ -232,11 +244,11 @@ make bench
 
 ## Roadmap
 
-- Weighted targets and slow-start for newly healthy instances
-- OpenTelemetry tracing (W3C `traceparent` propagation and spans per upstream attempt)
-- Request/response header rewrite rules and path rewrites beyond prefix stripping
-- mTLS to upstreams and TLS termination with certificate reload
-- Outlier detection that ejects targets based on live error rates, not only active checks
+- [ ] Weighted targets and slow-start for newly healthy instances (#1)
+- [ ] OpenTelemetry tracing (W3C `traceparent` propagation and spans per upstream attempt) (#2)
+- [ ] Request/response header rewrite rules and path rewrites beyond prefix stripping (#3)
+- [ ] mTLS to upstreams and TLS termination with certificate reload (#4)
+- [ ] Outlier detection that ejects targets based on live error rates, not only active checks (#5)
 
 ## License
 
