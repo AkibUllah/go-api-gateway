@@ -33,8 +33,8 @@ func TestRouterSpecificity(t *testing.T) {
 		{Name: "root", Prefix: "/", Handler: named("root")},
 		{Name: "api", Prefix: "/api", Handler: named("api")},
 		{Name: "users", Prefix: "/api/users/", Handler: named("users")},
-		{Name: "wild", Host: "*.dokan.com.bd", Prefix: "/api", Handler: named("wild")},
-		{Name: "seller", Host: "Seller.Dokan.com.bd", Prefix: "/", Handler: named("seller")},
+		{Name: "wild", Host: "*.dokan.test", Prefix: "/api", Handler: named("wild")},
+		{Name: "seller", Host: "Seller.Dokan.test", Prefix: "/", Handler: named("seller")},
 	})
 	cases := []struct{ host, path, want string }{
 		{"gw.local", "/", "root"},
@@ -44,10 +44,10 @@ func TestRouterSpecificity(t *testing.T) {
 		{"gw.local", "/api/users/42", "users"},
 		{"gw.local", "/api/usersettings", "api"}, // segment boundary
 		{"gw.local", "/apix", "root"},
-		{"shop.dokan.com.bd", "/api/x", "wild"},
-		{"shop.dokan.com.bd:8080", "/other", "root"},
-		{"seller.dokan.com.bd", "/api/x", "seller"}, // exact host beats wildcard host
-		{"dokan.com.bd", "/api", "api"},             // wildcard needs a subdomain
+		{"shop.dokan.test", "/api/x", "wild"},
+		{"shop.dokan.test:8080", "/other", "root"},
+		{"seller.dokan.test", "/api/x", "seller"}, // exact host beats wildcard host
+		{"dokan.test", "/api", "api"},             // wildcard needs a subdomain
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest("GET", c.path, nil)

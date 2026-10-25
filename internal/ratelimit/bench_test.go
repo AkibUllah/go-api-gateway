@@ -34,7 +34,7 @@ func BenchmarkMemoryAllowHotKey(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = m.Allow(ctx, "consumer:key:pathao")
+			_, _ = m.Allow(ctx, "consumer:key:swift")
 		}
 	})
 }

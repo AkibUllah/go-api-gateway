@@ -46,7 +46,7 @@ jwt:
     forward_claims: {sub: X-User-ID}
 api_keys:
   partners:
-    keys: [{name: pathao, key: partner-key}]
+    keys: [{name: swift, key: partner-key}]
 rate_limits:
   tight: {rate: 1, period: 1m, burst: 2}
 routes:
@@ -126,7 +126,7 @@ func TestEndToEndAuth(t *testing.T) {
 	}
 
 	rec, body = get(t, g, "/partner/delivery", "X-API-Key", "partner-key")
-	if rec.Code != 200 || body.Headers["X-Api-Key"] != "" || body.Headers["X-Consumer-Id"] != "key:pathao" {
+	if rec.Code != 200 || body.Headers["X-Api-Key"] != "" || body.Headers["X-Consumer-Id"] != "key:swift" {
 		t.Fatalf("partner: %d %v", rec.Code, body.Headers)
 	}
 }
