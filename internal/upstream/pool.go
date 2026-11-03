@@ -80,8 +80,8 @@ func NewPool(name string, cfg config.Upstream, obs Observer, now func() time.Tim
 	for _, code := range cfg.Retries.OnStatus {
 		p.retryOn[code] = true
 	}
-	for _, raw := range cfg.Targets {
-		u, err := url.Parse(raw)
+	for _, spec := range cfg.Targets {
+		u, err := url.Parse(spec.URL)
 		if err != nil {
 			return nil, fmt.Errorf("upstream %s: %w", name, err)
 		}

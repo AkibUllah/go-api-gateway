@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +112,68 @@ api_keys:
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.yaml))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+const weighted = `
+upstreams:
+  users:
+    targets:
+      - "http://127.0.0.1:9001"
+      - {url: "http://127.0.0.1:9002", weight: 3}
+      - url: "http://127.0.0.1:9003"
+%s
+routes:
+  - name: users
+    path_prefix: /api/users
+    upstream: users
+`
+
+func TestTargetsAcceptURLsAndWeightedMappings(t *testing.T) {
+	cfg, err := Parse([]byte(fmt.Sprintf(weighted, `    slow_start: 30s
+    health_check: {path: /health}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := cfg.Upstreams["users"]
+	want := []Target{
+		{URL: "http://127.0.0.1:9001", Weight: 1},
+		{URL: "http://127.0.0.1:9002", Weight: 3},
+		{URL: "http://127.0.0.1:9003", Weight: 1},
+	}
+	if !reflect.DeepEqual(u.Targets, want) {
+		t.Fatalf("targets = %+v, want %+v", u.Targets, want)
+	}
+	if u.SlowStart.D() != 30*time.Second {
+		t.Fatalf("slow_start = %v", u.SlowStart.D())
+	}
+	if got := TargetURLs("http://a", "http://b"); !reflect.DeepEqual(got, []Target{{"http://a", 1}, {"http://b", 1}}) {
+		t.Fatalf("TargetURLs = %+v", got)
+	}
+}
+
+func TestTargetWeightAndSlowStartValidation(t *testing.T) {
+	cases := map[string]struct{ targets, extra, want string }{
+		"zero weight":                      {`[{url: "http://a:1", weight: 0}]`, "", "weight must be between 1 and 1000, got 0"},
+		"negative weight":                  {`[{url: "http://a:1", weight: -2}]`, "", "weight must be between 1 and 1000, got -2"},
+		"weight too big":                   {`[{url: "http://a:1", weight: 1001}]`, "", "got 1001"},
+		"weight not int":                   {`[{url: "http://a:1", weight: heavy}]`, "", "weight must be an integer"},
+		"missing url":                      {`[{weight: 2}]`, "", "target needs a url"},
+		"unknown field":                    {`[{url: "http://a:1", wieght: 2}]`, "", "field wieght not found"},
+		"sequence target":                  {`[["http://a:1"]]`, "", "target must be a URL or {url, weight}"},
+		"bad url":                          {`[{url: "ftp://a", weight: 2}]`, "", "must be an absolute http(s) URL"},
+		"slow start without health checks": {`["http://a:1"]`, "    slow_start: 10s\n", "slow_start: needs health_check"},
+		"negative slow start":              {`["http://a:1"]`, "    slow_start: -1s\n", "must not be negative"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			yaml := "upstreams:\n  u:\n    targets: " + tc.targets + "\n" + tc.extra +
+				"routes:\n  - {name: r, path_prefix: /r, upstream: u}\n"
+			_, err := Parse([]byte(yaml))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want error containing %q, got %v", tc.want, err)
 			}
