@@ -19,7 +19,9 @@ var ErrNoTarget = errors.New("no healthy upstream target available")
 
 // Target is one backend instance.
 type Target struct {
-	URL     *url.URL
+	URL *url.URL
+	// weight is the configured relative share of traffic (>= 1).
+	weight  int64
 	healthy atomic.Bool
 	active  atomic.Int64
 	breaker *breaker.Breaker
@@ -27,6 +29,9 @@ type Target struct {
 	// health-check streaks, only touched by the checker goroutine
 	okStreak, failStreak int
 }
+
+// Weight returns the configured weight.
+func (t *Target) Weight() int { return int(t.weight) }
 
 // Healthy reports the active health-check verdict (true when checks are disabled).
 func (t *Target) Healthy() bool { return t.healthy.Load() }
@@ -85,7 +90,11 @@ func NewPool(name string, cfg config.Upstream, obs Observer, now func() time.Tim
 		if err != nil {
 			return nil, fmt.Errorf("upstream %s: %w", name, err)
 		}
-		t := &Target{URL: u}
+		w := int64(spec.Weight)
+		if w < 1 {
+			w = 1 // programmatic configs that skipped validation
+		}
+		t := &Target{URL: u, weight: w}
 		t.healthy.Store(true)
 		target := u.Host
 		t.breaker = breaker.New(breaker.Settings{
@@ -116,10 +125,10 @@ func (p *Pool) RetryableStatus(code int) bool { return p.retryOn[code] }
 // Pick selects a healthy target whose breaker admits the request, skipping any
 // in exclude. The caller must call target.Breaker().Done exactly once.
 func (p *Pool) Pick(exclude map[*Target]bool) (*Target, error) {
-	candidates := make([]*Target, 0, len(p.Targets))
+	candidates := make([]Candidate, 0, len(p.Targets))
 	for _, t := range p.Targets {
 		if !exclude[t] && t.Healthy() && t.breaker.State() != breaker.Open {
-			candidates = append(candidates, t)
+			candidates = append(candidates, Candidate{Target: t, Weight: p.effectiveWeight(t)})
 		}
 	}
 	for len(candidates) > 0 {
@@ -144,10 +153,13 @@ func (p *Pool) HealthyCount() int {
 	return n
 }
 
-func remove(ts []*Target, t *Target) []*Target {
-	out := ts[:0]
-	for _, x := range ts {
-		if x != t {
+// effectiveWeight is the target's current share in weightScale units.
+func (p *Pool) effectiveWeight(t *Target) int64 { return t.weight * weightScale }
+
+func remove(cs []Candidate, t *Target) []Candidate {
+	out := cs[:0]
+	for _, x := range cs {
+		if x.Target != t {
 			out = append(out, x)
 		}
 	}
