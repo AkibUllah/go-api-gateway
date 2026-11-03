@@ -29,7 +29,7 @@ rate_limits:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Server.Listen != ":8080" || cfg.Server.HealthPath != "/healthz" || cfg.Admin.MetricsPath != "/metrics" {
+	if cfg.Server.Listen != ":8080" || cfg.Server.HealthPath != "/healthz" || cfg.Admin.MetricsPath != "/metrics" || cfg.Admin.StatusPath != "/upstreams" {
 		t.Fatalf("server defaults not applied: %+v", cfg.Server)
 	}
 	if got := cfg.Routes[0].Timeout.D(); got != 30*time.Second {

@@ -185,3 +185,52 @@ func TestNoSlowStartMeansFullWeightOnRecovery(t *testing.T) {
 		t.Fatal("no ramp should be recorded when slow-start is off")
 	}
 }
+
+func TestStatusReportsEffectiveWeights(t *testing.T) {
+	clock := newFakeClock()
+	p, srv, up := slowStartPool(t, clock, "round_robin", 3, 2)
+	recoverTarget(t, p, srv, up)
+	clock.Advance(5 * time.Second)
+
+	st := p.Status()
+	if len(st) != 2 {
+		t.Fatalf("status has %d targets", len(st))
+	}
+	a, b := st[0], st[1]
+	if a.URL != "http://a:1" || !a.Healthy || a.Circuit != "closed" || a.Weight != 3 || a.EffectiveWeight != 3 || a.SlowStartEnds != nil {
+		t.Fatalf("steady target status = %+v", a)
+	}
+	if b.Weight != 2 || b.EffectiveWeight != 1.1 { // 0.2 + 1.8/2
+		t.Fatalf("ramping target weight %d, effective %v; want 2 and 1.1", b.Weight, b.EffectiveWeight)
+	}
+	if b.SlowStartEnds == nil || !b.SlowStartEnds.Equal(clock.Now().Add(5*time.Second)) {
+		t.Fatalf("slow_start_ends = %v, want %v", b.SlowStartEnds, clock.Now().Add(5*time.Second))
+	}
+
+	p.Targets[0].healthy.Store(false)
+	if w := p.Status()[0].EffectiveWeight; w != 0 {
+		t.Fatalf("unhealthy target effective weight = %v, want 0", w)
+	}
+}
+
+func TestStatusRedactsCredentialsAndZeroesOpenCircuits(t *testing.T) {
+	p, err := NewPool("creds", config.Upstream{
+		Targets:        []config.Target{{URL: "http://user:secret@a:1", Weight: 4}},
+		CircuitBreaker: config.CircuitBreaker{FailureThreshold: 1, OpenTimeout: config.Duration(time.Hour)},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := p.Targets[0]
+	if !tg.Breaker().Allow() {
+		t.Fatal("closed breaker rejected")
+	}
+	tg.Breaker().Done(false)
+	st := p.Status()[0]
+	if st.URL != "http://user:xxxxx@a:1" {
+		t.Fatalf("url = %q, credentials must be redacted", st.URL)
+	}
+	if st.Circuit != "open" || st.EffectiveWeight != 0 || st.Weight != 4 {
+		t.Fatalf("open circuit status = %+v", st)
+	}
+}

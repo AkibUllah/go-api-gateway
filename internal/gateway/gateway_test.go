@@ -175,6 +175,62 @@ func TestHealthReadyAndMetricsEndpoints(t *testing.T) {
 	}
 }
 
+func TestUpstreamsEndpointReportsWeights(t *testing.T) {
+	cat, ord := echoServer(t, "catalog"), echoServer(t, "orders")
+	cfg := testConfig(t, cat.URL, ord.URL, "")
+	u := cfg.Upstreams["catalog"]
+	u.Targets = []config.Target{{URL: cat.URL, Weight: 3}, {URL: ord.URL, Weight: 1}}
+	u.SlowStart = config.Duration(30 * time.Second)
+	cfg.Upstreams["catalog"] = u
+	g := newGateway(t, cfg)
+
+	var body struct {
+		Upstreams map[string]struct {
+			Balancer  string `json:"balancer"`
+			SlowStart string `json:"slow_start"`
+			Targets   []struct {
+				URL             string  `json:"url"`
+				Healthy         bool    `json:"healthy"`
+				Circuit         string  `json:"circuit"`
+				Weight          int     `json:"weight"`
+				EffectiveWeight float64 `json:"effective_weight"`
+			} `json:"targets"`
+		} `json:"upstreams"`
+	}
+	check := func(h http.Handler) {
+		t.Helper()
+		rec, _ := get(t, h, "/upstreams")
+		if rec.Code != 200 {
+			t.Fatalf("/upstreams %d %s", rec.Code, rec.Body)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		c := body.Upstreams["catalog"]
+		if c.Balancer != "round_robin" || c.SlowStart != "30s" || len(c.Targets) != 2 {
+			t.Fatalf("catalog status = %+v", c)
+		}
+		if tg := c.Targets[0]; tg.URL != cat.URL || !tg.Healthy || tg.Circuit != "closed" || tg.Weight != 3 || tg.EffectiveWeight != 3 {
+			t.Fatalf("catalog target = %+v", tg)
+		}
+		if o := body.Upstreams["orders"]; o.SlowStart != "" || o.Targets[0].EffectiveWeight != 1 {
+			t.Fatalf("orders status = %+v", o)
+		}
+	}
+	check(g)                // admin.listen is empty: served on the public handler
+	check(g.AdminHandler()) // and always on the admin mux
+}
+
+func TestUpstreamsEndpointNotPublicWithAdminListener(t *testing.T) {
+	cat, ord := echoServer(t, "catalog"), echoServer(t, "orders")
+	cfg := testConfig(t, cat.URL, ord.URL, "")
+	cfg.Admin.Listen = "127.0.0.1:0"
+	g := newGateway(t, cfg)
+	if rec, _ := get(t, g, "/upstreams"); rec.Code != http.StatusNotFound {
+		t.Fatalf("public /upstreams = %d, want 404 when an admin listener is configured", rec.Code)
+	}
+}
+
 func TestReadyzDegradedWhenAPoolHasNoHealthyTarget(t *testing.T) {
 	cat := echoServer(t, "catalog")
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")

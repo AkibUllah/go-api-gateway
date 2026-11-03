@@ -52,11 +52,14 @@ type Server struct {
 // TrustedNets returns the parsed trusted proxy CIDRs.
 func (s Server) TrustedNets() []*net.IPNet { return s.trusted }
 
-// Admin configures the optional admin listener serving /metrics, /healthz and /readyz.
-// When Listen is empty those endpoints are served on the public listener instead.
+// Admin configures the optional admin listener serving /metrics, /upstreams,
+// /healthz and /readyz. When Listen is empty those endpoints are served on the
+// public listener instead.
 type Admin struct {
 	Listen      string `yaml:"listen"`
 	MetricsPath string `yaml:"metrics_path"`
+	// StatusPath serves per-target health, circuit and weights as JSON.
+	StatusPath string `yaml:"status_path"`
 }
 
 // Logging configures slog output.
@@ -246,6 +249,7 @@ func (c *Config) applyDefaults() {
 	setStr(&s.HealthPath, "/healthz")
 	setStr(&s.ReadyPath, "/readyz")
 	setStr(&c.Admin.MetricsPath, "/metrics")
+	setStr(&c.Admin.StatusPath, "/upstreams")
 	setStr(&c.Logging.Level, "info")
 	setStr(&c.Logging.Format, "json")
 

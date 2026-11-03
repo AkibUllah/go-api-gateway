@@ -261,15 +261,21 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			g.MetricsHandler().ServeHTTP(w, r)
 			return
 		}
+	case rt.cfg.Admin.StatusPath:
+		if rt.cfg.Admin.Listen == "" {
+			g.Upstreams(w, r)
+			return
+		}
 	}
 	rt.handler.ServeHTTP(w, r)
 }
 
-// AdminHandler serves /metrics, /healthz and /readyz on the admin listener.
+// AdminHandler serves /metrics, /upstreams, /healthz and /readyz on the admin listener.
 func (g *Gateway) AdminHandler() http.Handler {
 	mux := http.NewServeMux()
 	cfg := g.Config()
 	mux.Handle(cfg.Admin.MetricsPath, g.MetricsHandler())
+	mux.HandleFunc(cfg.Admin.StatusPath, g.Upstreams)
 	mux.HandleFunc(cfg.Server.HealthPath, g.Healthz)
 	mux.HandleFunc(cfg.Server.ReadyPath, g.Readyz)
 	return mux
@@ -311,6 +317,28 @@ func (g *Gateway) Readyz(w http.ResponseWriter, _ *http.Request) {
 		status, code = "degraded", http.StatusServiceUnavailable
 	}
 	httpx.WriteJSON(w, code, map[string]any{"status": status, "upstreams": pools})
+}
+
+type upstreamStatus struct {
+	Balancer  string                  `json:"balancer"`
+	SlowStart string                  `json:"slow_start,omitempty"`
+	Targets   []upstream.TargetStatus `json:"targets"`
+}
+
+// Upstreams reports every pool's targets with health, circuit state, in-flight
+// requests and configured and effective weights. It is an operator endpoint:
+// target URLs are internal, so it lives on the admin listener.
+func (g *Gateway) Upstreams(w http.ResponseWriter, _ *http.Request) {
+	rt := g.current.Load()
+	out := make(map[string]upstreamStatus, len(rt.pools))
+	for name, p := range rt.pools {
+		st := upstreamStatus{Balancer: p.Config.Balancer, Targets: p.Status()}
+		if d := p.Config.SlowStart.D(); d > 0 {
+			st.SlowStart = d.String()
+		}
+		out[name] = st
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"upstreams": out})
 }
 
 // Pool returns a pool of the active runtime (tests and diagnostics).

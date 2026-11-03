@@ -210,6 +210,44 @@ func (p *Pool) markRecovered(t *Target) {
 	}
 }
 
+// TargetStatus is a point-in-time view of one target for the admin API.
+type TargetStatus struct {
+	URL     string `json:"url"`
+	Healthy bool   `json:"healthy"`
+	Circuit string `json:"circuit"`
+	Active  int64  `json:"active"`
+	Weight  int    `json:"weight"`
+	// EffectiveWeight is the weight the balancer uses right now: 0 while the
+	// target is out of rotation, a fraction of Weight during slow-start.
+	EffectiveWeight float64 `json:"effective_weight"`
+	// SlowStartEnds is set while the target is ramping up.
+	SlowStartEnds *time.Time `json:"slow_start_ends,omitempty"`
+}
+
+// Status reports every target with its configured and effective weight.
+func (p *Pool) Status() []TargetStatus {
+	now := p.now()
+	out := make([]TargetStatus, 0, len(p.Targets))
+	for _, t := range p.Targets {
+		st := TargetStatus{
+			URL:     t.URL.Redacted(),
+			Healthy: t.Healthy(),
+			Circuit: t.breaker.State().String(),
+			Active:  t.Active(),
+			Weight:  t.Weight(),
+		}
+		if st.Healthy && t.breaker.State() != breaker.Open {
+			st.EffectiveWeight = float64(p.effectiveWeight(t, now.UnixNano())) / weightScale
+		}
+		if since := t.recoveredAt.Load(); since != 0 && p.slowStart > 0 {
+			ends := time.Unix(0, since).Add(p.slowStart).UTC()
+			st.SlowStartEnds = &ends
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
 func remove(cs []Candidate, t *Target) []Candidate {
 	out := cs[:0]
 	for _, x := range cs {
