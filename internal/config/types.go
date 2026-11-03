@@ -32,6 +32,42 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// UnmarshalYAML implements yaml.Unmarshaler. A scalar is a URL with weight 1;
+// a mapping accepts only url and weight. An omitted weight defaults to 1, an
+// explicit one is kept as written so validation can reject 0 or negatives.
+func (t *Target) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*t = Target{Weight: 1}
+		return n.Decode(&t.URL)
+	}
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: target must be a URL or {url, weight}", n.Line)
+	}
+	out := Target{Weight: 1}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		var err error
+		switch k.Value {
+		case "url":
+			err = v.Decode(&out.URL)
+		case "weight":
+			if err = v.Decode(&out.Weight); err != nil {
+				err = fmt.Errorf("line %d: weight must be an integer", v.Line)
+			}
+		default:
+			err = fmt.Errorf("line %d: field %s not found in target", k.Line, k.Value)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if out.URL == "" {
+		return fmt.Errorf("line %d: target needs a url", n.Line)
+	}
+	*t = out
+	return nil
+}
+
 // ByteSize is a byte count that unmarshals from integers or strings such as
 // "512KB", "10MB", "1MiB". Decimal (KB/MB/GB) and binary (KiB/MiB/GiB) units are supported.
 type ByteSize int64

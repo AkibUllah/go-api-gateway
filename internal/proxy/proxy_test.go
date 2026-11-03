@@ -141,7 +141,7 @@ type harness struct {
 
 func newHarness(t *testing.T, ucfg config.Upstream, targets ...string) *harness {
 	t.Helper()
-	ucfg.Targets = targets
+	ucfg.Targets = config.TargetURLs(targets...)
 	if ucfg.Balancer == "" {
 		ucfg.Balancer = "round_robin"
 	}
@@ -408,7 +408,7 @@ func BenchmarkProxyRoundTrip(b *testing.B) {
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	}))
 	defer upstreamSrv.Close()
-	p, _ := upstream.NewPool("bench", config.Upstream{Targets: []string{upstreamSrv.URL}, Balancer: "round_robin"}, nil, nil)
+	p, _ := upstream.NewPool("bench", config.Upstream{Targets: config.TargetURLs(upstreamSrv.URL), Balancer: "round_robin"}, nil, nil)
 	tr := NewTransport(time.Second, 256)
 	defer tr.CloseIdleConnections()
 	gw := httptest.NewServer(New(Options{Pool: p, Transport: tr, Log: discard}))

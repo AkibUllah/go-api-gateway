@@ -15,7 +15,7 @@ import (
 
 func pool(t *testing.T, balancer string, targets ...string) *Pool {
 	t.Helper()
-	p, err := NewPool("test", config.Upstream{Targets: targets, Balancer: balancer}, nil, nil)
+	p, err := NewPool("test", config.Upstream{Targets: config.TargetURLs(targets...), Balancer: balancer}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestLeastConnPrefersIdleTarget(t *testing.T) {
 
 func TestPickSkipsUnhealthyExcludedAndOpenTargets(t *testing.T) {
 	cfg := config.Upstream{
-		Targets:        []string{"http://a:1", "http://b:1", "http://c:1"},
+		Targets:        config.TargetURLs("http://a:1", "http://b:1", "http://c:1"),
 		CircuitBreaker: config.CircuitBreaker{FailureThreshold: 1, OpenTimeout: config.Duration(time.Hour)},
 	}
 	p, err := NewPool("test", cfg, nil, nil)
@@ -122,7 +122,7 @@ func TestHealthCheckThresholds(t *testing.T) {
 
 	obs := &recordingObserver{}
 	p, err := NewPool("svc", config.Upstream{
-		Targets: []string{srv.URL + "/base/"},
+		Targets: config.TargetURLs(srv.URL + "/base/"),
 		HealthCheck: config.HealthCheck{
 			Path: "/health", Timeout: config.Duration(time.Second),
 			HealthyThreshold: 2, UnhealthyThreshold: 2,
@@ -163,7 +163,7 @@ func TestHealthCheckLoopStopsOnCancel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 	defer srv.Close()
 	p, _ := NewPool("svc", config.Upstream{
-		Targets: []string{srv.URL},
+		Targets: config.TargetURLs(srv.URL),
 		HealthCheck: config.HealthCheck{
 			Path: "/health", Interval: config.Duration(5 * time.Millisecond), Timeout: config.Duration(time.Second),
 			HealthyThreshold: 1, UnhealthyThreshold: 1,
@@ -199,7 +199,7 @@ func TestSingleJoin(t *testing.T) {
 
 func BenchmarkPickLeastConn(b *testing.B) {
 	p, _ := NewPool("bench", config.Upstream{
-		Targets:        []string{"http://a:1", "http://b:1", "http://c:1", "http://d:1"},
+		Targets:        config.TargetURLs("http://a:1", "http://b:1", "http://c:1", "http://d:1"),
 		Balancer:       "least_conn",
 		CircuitBreaker: config.CircuitBreaker{FailureThreshold: 5, OpenTimeout: config.Duration(time.Second)},
 	}, nil, nil)

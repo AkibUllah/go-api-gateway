@@ -76,13 +76,36 @@ type Redis struct {
 
 // Upstream is a pool of interchangeable backend targets.
 type Upstream struct {
-	Targets        []string       `yaml:"targets"`
-	Balancer       string         `yaml:"balancer"`
+	Targets  []Target `yaml:"targets"`
+	Balancer string   `yaml:"balancer"`
+	// SlowStart ramps a target that turns healthy again from 10% to 100% of
+	// its weight over this window. Zero disables slow-start.
+	SlowStart      Duration       `yaml:"slow_start"`
 	HealthCheck    HealthCheck    `yaml:"health_check"`
 	CircuitBreaker CircuitBreaker `yaml:"circuit_breaker"`
 	Retries        Retries        `yaml:"retries"`
 	DialTimeout    Duration       `yaml:"dial_timeout"`
 	MaxIdleConns   int            `yaml:"max_idle_conns_per_host"`
+}
+
+// MaxTargetWeight bounds per-target weights so weighted arithmetic stays far
+// away from overflow and a typo like 10000 is caught at load time.
+const MaxTargetWeight = 1000
+
+// Target is one backend URL with its relative share of traffic. In YAML it is
+// either a plain URL string (weight 1) or a mapping {url: ..., weight: N}.
+type Target struct {
+	URL    string `yaml:"url"`
+	Weight int    `yaml:"weight"`
+}
+
+// TargetURLs builds weight-1 targets from URLs (tests and programmatic configs).
+func TargetURLs(urls ...string) []Target {
+	out := make([]Target, len(urls))
+	for i, u := range urls {
+		out[i] = Target{URL: u, Weight: 1}
+	}
+	return out
 }
 
 // HealthCheck configures active probing of every target in a pool.
@@ -342,10 +365,16 @@ func (c *Config) Validate() error {
 			add("upstreams.%s: at least one target is required", name)
 		}
 		for _, t := range u.Targets {
-			pu, err := url.Parse(t)
+			pu, err := url.Parse(t.URL)
 			if err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" {
-				add("upstreams.%s: target %q must be an absolute http(s) URL", name, t)
+				add("upstreams.%s: target %q must be an absolute http(s) URL", name, t.URL)
 			}
+			if t.Weight < 1 || t.Weight > MaxTargetWeight {
+				add("upstreams.%s: target %q weight must be between 1 and %d, got %d", name, t.URL, MaxTargetWeight, t.Weight)
+			}
+		}
+		if u.SlowStart > 0 && !u.HealthCheck.Enabled() {
+			add("upstreams.%s.slow_start: needs health_check, targets only ramp up after recovering", name)
 		}
 		if u.Balancer != "round_robin" && u.Balancer != "least_conn" {
 			add("upstreams.%s.balancer: must be round_robin or least_conn, got %q", name, u.Balancer)
