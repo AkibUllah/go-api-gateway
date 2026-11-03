@@ -69,6 +69,7 @@ func (p *Pool) CheckOnce(ctx context.Context, client *http.Client, t *Target, lo
 		t.okStreak++
 		t.failStreak = 0
 		if !t.Healthy() && t.okStreak >= hc.HealthyThreshold {
+			p.markRecovered(t) // before healthy, so the first pick already ramps
 			t.healthy.Store(true)
 			p.observer.TargetHealth(p.Name, t.URL.Host, true)
 			if log != nil {

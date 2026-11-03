@@ -23,8 +23,11 @@ type Target struct {
 	// weight is the configured relative share of traffic (>= 1).
 	weight  int64
 	healthy atomic.Bool
-	active  atomic.Int64
-	breaker *breaker.Breaker
+	// recoveredAt is when the target last turned healthy (unix nanoseconds),
+	// or 0 when it is not ramping up under slow-start.
+	recoveredAt atomic.Int64
+	active      atomic.Int64
+	breaker     *breaker.Breaker
 
 	// health-check streaks, only touched by the checker goroutine
 	okStreak, failStreak int
@@ -76,15 +79,27 @@ type Pool struct {
 	balancer Balancer
 	observer Observer
 	retryOn  map[int]bool
+
+	slowStart time.Duration
+	now       func() time.Time
 }
 
 // NewPool builds a pool from configuration. All targets start healthy so the
 // gateway serves traffic immediately; active checks demote them if needed.
+// Targets present at startup or reload get their full weight at once; only a
+// target that recovers later ramps up under slow-start. now is the clock for
+// breakers and slow-start (nil means time.Now).
 func NewPool(name string, cfg config.Upstream, obs Observer, now func() time.Time) (*Pool, error) {
 	if obs == nil {
 		obs = nopObserver{}
 	}
-	p := &Pool{Name: name, Config: cfg, observer: obs, retryOn: map[int]bool{}}
+	if now == nil {
+		now = time.Now
+	}
+	p := &Pool{
+		Name: name, Config: cfg, observer: obs, retryOn: map[int]bool{},
+		slowStart: cfg.SlowStart.D(), now: now,
+	}
 	for _, code := range cfg.Retries.OnStatus {
 		p.retryOn[code] = true
 	}
@@ -128,10 +143,14 @@ func (p *Pool) RetryableStatus(code int) bool { return p.retryOn[code] }
 // Pick selects a healthy target whose breaker admits the request, skipping any
 // in exclude. The caller must call target.Breaker().Done exactly once.
 func (p *Pool) Pick(exclude map[*Target]bool) (*Target, error) {
+	var now int64
+	if p.slowStart > 0 {
+		now = p.now().UnixNano()
+	}
 	candidates := make([]Candidate, 0, len(p.Targets))
 	for _, t := range p.Targets {
 		if !exclude[t] && t.Healthy() && t.breaker.State() != breaker.Open {
-			candidates = append(candidates, Candidate{Target: t, Weight: p.effectiveWeight(t)})
+			candidates = append(candidates, Candidate{Target: t, Weight: p.effectiveWeight(t, now)})
 		}
 	}
 	for len(candidates) > 0 {
@@ -156,8 +175,40 @@ func (p *Pool) HealthyCount() int {
 	return n
 }
 
-// effectiveWeight is the target's current share in weightScale units.
-func (p *Pool) effectiveWeight(t *Target) int64 { return t.weight * weightScale }
+// slowStartFloor is the share of its weight a target gets the moment it
+// recovers, in percent.
+const slowStartFloor = 10
+
+// effectiveWeight is the target's current share in weightScale units: its
+// full weight, or during slow-start a linear ramp from 10% to 100% of it over
+// the window. now is unix nanoseconds and only read when slow-start is on.
+func (p *Pool) effectiveWeight(t *Target, now int64) int64 {
+	full := t.weight * weightScale
+	if p.slowStart <= 0 {
+		return full
+	}
+	since := t.recoveredAt.Load()
+	if since == 0 {
+		return full
+	}
+	elapsed := now - since
+	if elapsed >= int64(p.slowStart) {
+		t.recoveredAt.CompareAndSwap(since, 0) // ramp finished; skip the maths next time
+		return full
+	}
+	if elapsed < 0 { // clock stepped back: stay at the floor rather than overshoot
+		elapsed = 0
+	}
+	floor := full * slowStartFloor / 100
+	return floor + int64(float64(full-floor)*float64(elapsed)/float64(p.slowStart))
+}
+
+// markRecovered starts the slow-start ramp for a target that turned healthy.
+func (p *Pool) markRecovered(t *Target) {
+	if p.slowStart > 0 {
+		t.recoveredAt.Store(p.now().UnixNano())
+	}
+}
 
 func remove(cs []Candidate, t *Target) []Candidate {
 	out := cs[:0]
