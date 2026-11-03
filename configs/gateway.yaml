@@ -31,9 +31,13 @@ redis:
 upstreams:
   catalog:
     balancer: round_robin
+    # A target is a URL (weight 1) or {url: ..., weight: N} for a bigger share.
     targets:
       - "${CATALOG_1_URL:-http://127.0.0.1:9001}"
       - "${CATALOG_2_URL:-http://127.0.0.1:9002}"
+    # A replica that comes back from failing health checks starts at 10% of
+    # its weight and ramps to full over 20s while its caches warm up.
+    slow_start: 20s
     health_check:
       path: /health
       interval: 5s

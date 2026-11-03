@@ -261,6 +261,9 @@ func TestBundledConfigLoadsWithoutEnvironment(t *testing.T) {
 	if cfg.Routes[1].MaxBodyBytes != 256_000 {
 		t.Fatalf("orders body limit = %d", cfg.Routes[1].MaxBodyBytes)
 	}
+	if c := cfg.Upstreams["catalog"]; c.SlowStart.D() != 20*time.Second || len(c.Targets) != 2 || c.Targets[0].Weight != 1 {
+		t.Fatalf("catalog pool: slow_start %v, targets %+v", c.SlowStart.D(), c.Targets)
+	}
 }
 
 func TestLoadMissingFile(t *testing.T) {
