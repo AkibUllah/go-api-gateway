@@ -28,6 +28,9 @@ type Target struct {
 
 	// health-check streaks, only touched by the checker goroutine
 	okStreak, failStreak int
+	// score is the smooth weighted round-robin state, guarded by the mutex
+	// of the pool's balancer.
+	score int64
 }
 
 // Weight returns the configured weight.
