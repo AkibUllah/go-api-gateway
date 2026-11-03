@@ -38,6 +38,7 @@ In the payment and e-commerce systems I have worked on, every service eventually
 
 - **Routing**: host match (exact or `*.example.com`) and longest path-prefix match on segment boundaries, method filters with proper `405` + `Allow`, optional prefix stripping
 - **Upstream pools**: round-robin or least-connections, active health checks with healthy/unhealthy thresholds, per-target circuit breaker (closed → open → half-open probes)
+- **Weighted targets and slow-start**: per-target `weight` with smooth weighted round-robin (the nginx algorithm) and weight-scaled least-connections; `slow_start` ramps a target that turns healthy again from 10% to 100% of its weight so a cold instance is not flooded; effective weights on the admin `/upstreams` endpoint
 - **Retries**: idempotent, bodiless requests are retried on a *different* target after connection errors or 502/503/504, with backoff, inside the route's overall timeout
 - **Auth**: JWT (HS256/384/512, RS256/384/512 from a PEM file or a JWKS URL with caching, rotation and fetch throttling), issuer/audience/expiry checks, claims forwarded as headers; API keys stored as SHA-256 digests and compared in constant time
 - **Rate limiting**: token bucket per client IP, authenticated consumer or any header; sharded in-memory buckets or an atomic Lua script in Redis shared by all replicas; `RateLimit-*` and `Retry-After` headers; fail-open or fail-closed when Redis is down
@@ -135,7 +136,10 @@ One YAML file, validated strictly at startup and on every reload (unknown keys, 
 upstreams:
   catalog:
     balancer: round_robin            # or least_conn
-    targets: ["${CATALOG_1_URL:-http://127.0.0.1:9001}", "${CATALOG_2_URL:-http://127.0.0.1:9002}"]
+    targets:
+      - "${CATALOG_1_URL:-http://127.0.0.1:9001}"            # weight 1
+      - {url: "${CATALOG_2_URL:-http://127.0.0.1:9002}", weight: 3}
+    slow_start: 30s                  # recovered targets ramp 10% → 100% of their weight
     health_check: {path: /health, interval: 5s, timeout: 1s, healthy_threshold: 2, unhealthy_threshold: 2}
     circuit_breaker: {failure_threshold: 5, open_timeout: 15s}
     retries: {attempts: 1, backoff: 20ms}          # on 502/503/504 and connection errors
@@ -164,8 +168,8 @@ routes:
 | Key | Purpose |
 | --- | --- |
 | `server` | `listen`, read/write/idle timeouts, `default_timeout`, `max_body_bytes`, `trusted_proxies`, health/ready paths |
-| `admin` | separate listener for `/metrics`, `/healthz`, `/readyz` (`listen: ""` serves them on the main port) |
-| `upstreams.<name>` | `targets`, `balancer`, `health_check`, `circuit_breaker`, `retries`, `dial_timeout`, `max_idle_conns_per_host` |
+| `admin` | separate listener for `/metrics`, `/upstreams`, `/healthz`, `/readyz` (`listen: ""` serves them on the main port); `metrics_path`, `status_path` |
+| `upstreams.<name>` | `targets` (URL or `{url, weight}`, weight 1-1000, default 1), `balancer`, `slow_start`, `health_check`, `circuit_breaker`, `retries`, `dial_timeout`, `max_idle_conns_per_host` |
 | `jwt.<name>` | `algorithms`, one of `secret` / `public_key_file` / `jwks_url`, `jwks_cache_ttl`, `issuer`, `audience`, `leeway`, `forward_claims` |
 | `api_keys.<name>` | `header` and `keys` (`key` from env, or `sha256` digest) |
 | `rate_limits.<name>` | `rate` per `period`, `burst`, `key` (`ip`, `consumer`, `header:<Name>`), `backend` (`memory`, `redis`) |
@@ -174,6 +178,30 @@ routes:
 
 `${VAR}` without a default must be set, so a missing secret stops startup instead of becoming an empty string.
 
+### Weights and slow-start
+
+`round_robin` with weights 3:1 sends exactly 3 of every 4 requests to the first target, interleaved (smooth weighted round-robin) rather than in bursts; when all weights are equal it stays a lock-free counter. `least_conn` compares in-flight requests per unit of weight and splits ties between different weights by weight, so an idle pool still follows the ratio.
+
+With `slow_start: 30s`, a target that passes its health checks again gets 10% of its weight at first and its full weight 30s later, rising linearly. Targets present at startup or after a reload start at full weight. `slow_start` requires `health_check`, since only a recovery starts the ramp.
+
+```bash
+curl -s localhost:9090/upstreams | jq '.upstreams.catalog'
+```
+
+```json
+{
+  "balancer": "round_robin",
+  "slow_start": "30s",
+  "targets": [
+    {"url": "http://catalog-1:9001", "healthy": true, "circuit": "closed", "active": 0, "weight": 1, "effective_weight": 1},
+    {"url": "http://catalog-2:9001", "healthy": true, "circuit": "closed", "active": 2, "weight": 3, "effective_weight": 1.65,
+     "slow_start_ends": "2026-11-03T10:15:30Z"}
+  ]
+}
+```
+
+`effective_weight` is 0 while a target is unhealthy or its circuit is open. Credentials in target URLs are redacted.
+
 ## Endpoints and headers
 
 | Path | Listener | Purpose |
@@ -181,6 +209,7 @@ routes:
 | `/healthz` | public + admin | Liveness: the process is serving |
 | `/readyz` | public + admin | Readiness: `503` while draining or when any pool has no healthy target; JSON per-pool counts |
 | `/metrics` | admin (or public if `admin.listen` is empty) | Prometheus |
+| `/upstreams` | admin (or public if `admin.listen` is empty) | Per-target health, circuit, in-flight requests, configured and effective weights |
 | everything else | public | Routed by `routes[]` |
 
 Errors produced by the gateway itself share one shape: `{"error": {"code": "rate_limited", "message": "too many requests", "request_id": "…"}}` with codes `route_not_found`, `method_not_allowed`, `unauthorized`, `rate_limited`, `body_too_large`, `upstream_timeout`, `no_healthy_upstream`, `bad_gateway`.
@@ -206,6 +235,8 @@ Metrics: `gateway_requests_total{route,method,code}`, `gateway_request_duration_
 | `ProxyRoundTrip` | 71,015 | 13,768 | 159 | client → ReverseProxy + retry transport → upstream, parallel |
 | `GatewayEndToEnd` | 86,072 | 17,633 | 202 | full stack over TCP (router, middleware, rate limit, proxy), parallel: ~11.6k req/s |
 
+Weighted targets were added after this run: `PickLeastConn` now allocates 64 B (the candidate list carries effective weights), and round-robin over unequal weights takes a short mutex for the smooth weighted scores while equal weights keep the lock-free counter; `BenchmarkPickRoundRobin` and `BenchmarkPickWeightedRoundRobin` cover both paths.
+
 The gateway's own overhead over a bare `ReverseProxy` hop is roughly the difference between the last two rows (~15 µs, mostly logging and metrics). RS256 verification dominates when it is enabled; HS256 or API keys keep auth under 10 µs.
 
 ## Project Structure
@@ -221,7 +252,7 @@ internal/
 ├── config/           # YAML schema, ${VAR:-default} expansion, defaults, validation
 ├── gateway/          # compiles a config into a runtime, atomic reload, health/ready, Serve
 ├── proxy/            # router (host/prefix/method) and ReverseProxy + retrying transport
-├── upstream/         # pools, round-robin / least-conn, active health checks
+├── upstream/         # pools, weighted round-robin / least-conn, slow-start, active health checks
 ├── breaker/          # consecutive-failure circuit breaker
 ├── middleware/       # request id, access log, recover, CORS, body limit, auth, rate limit, timeout, gzip
 ├── auth/             # JWT verifier, JWKS cache, API keys
@@ -240,11 +271,10 @@ make lint     # golangci-lint v2 (gosec, errorlint, revive, bodyclose, noctx, ..
 make bench
 ```
 
-82 test functions (111 including subtests) across 10 packages, 86.8% statement coverage of `internal/`, all against real `httptest` servers and listeners rather than mocks of `net/http`. Covered: config parsing, env expansion, byte sizes and every cross-reference rule; breaker transitions with an injected clock; round-robin and least-connections distribution, health thresholds and target exclusion; token buckets on both backends (burst, refill, cap, independence, exact counts under 20 concurrent goroutines, Redis TTLs and shared state across replicas via miniredis); JWT expiry, issuer, audience, `alg: none` and RS/HS confusion, JWKS caching, rotation, throttling and stale-key fallback; API key digests; CORS origin matching including look-alike domains; gzip negotiation and skip rules; spoofed claim, consumer and `X-Forwarded-For` headers; retries on status and connection errors (and none for `POST`), circuit shedding, route timeouts, client cancels; end-to-end routing, auth, rate limits, readiness, metrics output, atomic reload, failed reload keeping the old config and graceful shutdown completing an in-flight request.
+100 test functions (139 including subtests) across 10 packages, 88.0% statement coverage of `internal/`, all against real `httptest` servers and listeners rather than mocks of `net/http`. Covered: config parsing, env expansion, byte sizes and every cross-reference rule; breaker transitions with an injected clock; round-robin and least-connections distribution, health thresholds and target exclusion; weighted distribution (3:1 gives exactly 75/25, smooth 5:1:1 interleaving, weights under concurrency) and slow-start ramps driven by an injected clock; token buckets on both backends (burst, refill, cap, independence, exact counts under 20 concurrent goroutines, Redis TTLs and shared state across replicas via miniredis); JWT expiry, issuer, audience, `alg: none` and RS/HS confusion, JWKS caching, rotation, throttling and stale-key fallback; API key digests; CORS origin matching including look-alike domains; gzip negotiation and skip rules; spoofed claim, consumer and `X-Forwarded-For` headers; retries on status and connection errors (and none for `POST`), circuit shedding, route timeouts, client cancels; end-to-end routing, auth, rate limits, readiness, metrics output, atomic reload, failed reload keeping the old config and graceful shutdown completing an in-flight request.
 
 ## Roadmap
 
-- [ ] Weighted targets and slow-start for newly healthy instances (#1)
 - [ ] OpenTelemetry tracing (W3C `traceparent` propagation and spans per upstream attempt) (#2)
 - [ ] Request/response header rewrite rules and path rewrites beyond prefix stripping (#3)
 - [ ] mTLS to upstreams and TLS termination with certificate reload (#4)
