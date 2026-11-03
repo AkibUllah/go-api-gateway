@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-target `weight` in upstream pools (a target is a URL or `{url, weight}`, weights 1-1000, default 1). `round_robin` uses smooth weighted round-robin and `least_conn` compares in-flight requests per unit of weight (#1).
+- `slow_start` on upstream pools: a target that turns healthy again ramps linearly from 10% to 100% of its weight over the window (#1).
+- Admin `/upstreams` endpoint (`admin.status_path`) with per-target health, circuit state, in-flight requests, configured and effective weights (#1).
+
 - CodeQL analysis for Go and GitHub Actions on pushes and pull requests to `main` and on a weekly schedule.
 - Dependabot version updates for Go modules, Docker and GitHub Actions, with minor and patch updates grouped per ecosystem.
 - README screenshots: a curl session against gateway-demo and the test/benchmark run.
@@ -16,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The demo `catalog` pool uses a 20s slow-start.
 - Demo configuration and tests use fictional courier partner names and reserved `.test` domains (the `partners` key set now lists `swift-courier` and `river-logistics`).
 
 ## [0.1.0] - 2026-10-25
